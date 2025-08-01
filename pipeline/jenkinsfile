@@ -1,9 +1,11 @@
+@library('mlops-shared-library') _
+
 pipeline {
     agent any
 
     parameters {
         string(name: "MODEL_NAME", defaultValue: 'diabetes-prediction', description: 'Name of the model')
-        string(name: "PYTHON_VERSION", defaultValue: '3.9', description: 'Python version to use')
+        // string(name: "PYTHON_VERSION", defaultValue: '3.9', description: 'Python version to use')
         string(name: "DOCKER_REGISTRY", defaultValue: 'docker.io', description: 'Docker registry URL')
         string(name: "DOCKER_CREDENTIALS_ID", defaultValue: 'docker-registry', description: 'Credentials ID for Docker registry')
         booleanParam(name: "HAS_API", defaultValue: true, description: 'Does the model have an API?')
@@ -25,26 +27,26 @@ pipeline {
                         script {
                             env.DOCKER_REGISTRY = params.DOCKER_REGISTRY ?: 'docker.io'
                             env.MODEL_NAME = params.MODEL_NAME ?: 'diabetes-prediction'
-                            env.PYTHON_VERSION = params.PYTHON_VERSION ?: '3.9'
+                            // env.PYTHON_VERSION = params.PYTHON_VERSION ?: '3.9'
                             env.DOCKER_CREDENTIALS_ID = params.DOCKER_CREDENTIALS_ID ?: 'docker-registry'
                         }
-                    }
-                }
-                stage('install dependencies') {
-                    steps {
-                        sh """
-                            echo "Installing dependencies..."
-                            python -m pip install --upgrade pip
-                            pip install -r requirements.txt
-                        """
                     }
                 }
                 stage('setup virtual environment') {
                     steps {
                         sh """
                             echo "Setting up virtual environment..."
-                            python -m venv venv
+                            python3 -m venv venv
                             . venv/bin/activate || venv\\Scripts\\activate
+                        """
+                    }
+                }
+                stage('install dependencies') {
+                    steps {
+                        sh """
+                            echo "Installing dependencies..."
+                            python3 -m pip install --upgrade pip
+                            python3 -m pip install -r requirements.txt
                         """
                     }
                 }
