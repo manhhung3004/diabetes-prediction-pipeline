@@ -1,4 +1,4 @@
-@library('mlops-shared-library') _
+@Library('mlops-shared-library') _
 
 pipeline {
     agent any
