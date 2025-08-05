@@ -5,109 +5,120 @@ pipeline {
 
     parameters {
         string(name: "MODEL_NAME", defaultValue: 'diabetes-prediction', description: 'Name of the model')
-        // string(name: "PYTHON_VERSION", defaultValue: '3.9', description: 'Python version to use')
         string(name: "DOCKER_REGISTRY", defaultValue: 'docker.io', description: 'Docker registry URL')
         string(name: "DOCKER_CREDENTIALS_ID", defaultValue: 'docker-registry', description: 'Credentials ID for Docker registry')
         booleanParam(name: "HAS_API", defaultValue: true, description: 'Does the model have an API?')
         booleanParam(name: "USE_HELM", defaultValue: false, description: 'Use Helm for deployment?')
         booleanParam(name: "USE_MLFLOW", defaultValue: false, description: 'Use MLflow for tracking?')
         booleanParam(name: "RUN_LOAD_TESTS", defaultValue: false, description: 'Run load tests?')
+        booleanParam(name: "SKIP_TESTS", defaultValue: false, description: 'Skip testing stages?')
+        choice(name: "ENVIRONMENT", choices: ['dev', 'staging', 'prod'], description: 'Deployment environment')
+    }
+
+    environment {
+        config = [
+            // Basic and Common Variables
+            modelName: "${params.MODEL_NAME}",
+            dockerRegistry: "${params.DOCKER_REGISTRY}",
+            dockerCredentialsId: "${params.DOCKER_CREDENTIALS_ID}",
+            dockerImage: "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:${env.BUILD_NUMBER}",
+            dockerImageLatest: "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:latest",
+            helmChartPath: "./deployment/helm",
+            helmChartName: "${params.MODEL_NAME}-chart",
+            dockerRegistry: 'docker.io',
+
+            // Feature Flags
+            hasApi: true,
+            useHelm: "${params.USE_HELM}",
+            useMlflow: "${params.USE_MLFLOW}",
+            runLoadTests: false,
+            runSecurityTests: true,
+            runSmokeTests: true,
+            autoRollback: true,
+            
+            // Monitoring
+            enablePrometheus: true,
+            enableGrafana: false,
+            enableAlerting: false,
+            
+            // Notifications
+            emailRecipients: 'manhhung20033004@gmail.com'
+        ]
     }
 
     stages {
-        stage('preparation') {
-            stages {
-                stage('checkout') {
-                    steps {
-                        checkout scm
-                    }
-                }
-                stage('setup') {
-                    steps {
-                        script {
-                            env.DOCKER_REGISTRY = params.DOCKER_REGISTRY ?: 'docker.io'
-                            env.MODEL_NAME = params.MODEL_NAME ?: 'diabetes-prediction'
-                            // env.PYTHON_VERSION = params.PYTHON_VERSION ?: '3.9'
-                            env.DOCKER_CREDENTIALS_ID = params.DOCKER_CREDENTIALS_ID ?: 'docker-registry'
-                        }
-                    }
-                }
-                stage('setup virtual environment') {
-                    steps {
-                        sh """
-                            echo "Setting up virtual environment..."
-                            python3 -m venv venv
-                            . venv/bin/activate || venv\\Scripts\\activate
-                        """
-                    }
-                }
-                stage('install dependencies') {
-                    steps {
-                        sh """
-                            echo "Installing dependencies..."
-                            python3 -m pip install --upgrade pip
-                            python3 -m pip install -r requirements.txt
-                        """
-                    }
-                }
-                stage('test environment'){
-                    steps {
-                        sh """
-                            echo "Running tests..."
-                            . venv/bin/activate || venv\\Scripts\\activate
-                            pytest tests/ -v --cov=src --cov-report=xml
-                        """
-                    }
+        stage("Data Validation") {
+            steps {
+                script {
+                    dataValidation(config)
                 }
             }
         }
-        stage('build and push') {
-            stages{
-                stage('build docker image') {
-                    steps {
-                        script {
-                            def dockerImage = "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:${env.BUILD_NUMBER}"
-                            sh """
-                                echo "Building Docker image ${dockerImage}..."
-                                docker build -t ${dockerImage} .
-                            """
-                        }
-                    }
-                }
-                stage('push docker image') {
-                    steps {
-                        script {
-                            def dockerImage = "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:${env.BUILD_NUMBER}"
-                            withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS_ID, usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                                sh """
-                                    echo "Pushing Docker image ${dockerImage}..."
-                                    docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${env.DOCKER_REGISTRY}
-                                    docker push ${dockerImage}
-                                """
-                            }
-                        }
-                    }
+        stage("Model training") {
+            steps {
+                script {
+                    modelTraining(config)
                 }
             }
         }
-        stage('Deploy to kubernetes') {
+        stage("Model Validation"){
+            steps {
+                script {
+                    modelValidation(config)
+                }
+            }
+        }
+        stage("Model Testing") {
+            steps {
+                script {
+                    modelTesting(config)
+                }
+            }
+        }
+        stage("Model Packaging") {
             when {
-                expression { params.USE_HELM || params.USE_MLFLOW }
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                    branch 'develop'
+                }
             }
             steps {
                 script {
-                    if (params.USE_HELM) {
-                        sh """
-                            echo "Deploying to Kubernetes using Helm..."
-                            helm upgrade --install ${env.RELEASE_NAME} ${env.CHART_PATH} --namespace ${env.NAMESPACE} --values ${env.VALUES_FILE}
-                        """
-                    }
-                    if (params.USE_MLFLOW) {
-                        sh """
-                            echo "Deploying to Kubernetes using MLflow..."
-                            mlflow models serve -m ${env.MODEL_URI} -p ${env.MLFLOW_PORT}
-                        """
-                    }
+                    modelPackaging(config)
+                }
+            }
+        }
+        stage("Model Deployment") {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                }
+            }
+            steps {
+                script {
+                    modelDeployment(config)
+                }
+            }
+        }
+        stage("Model Monitoring Setup") {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                }
+            }
+            steps {
+                script {
+                    modelMonitoringSetup(config)
+                }
+            }
+        }
+        stage("Send Notifications") {
+            steps {
+                script {
+                    sendNotifications(config)
                 }
             }
         }
