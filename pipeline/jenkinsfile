@@ -1,6 +1,10 @@
 @Library('mlops-shared-library') _
 
 pipeline {
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
     agent any
 
     parameters {
@@ -15,62 +19,120 @@ pipeline {
         choice(name: "ENVIRONMENT", choices: ['dev', 'staging', 'prod'], description: 'Deployment environment')
     }
 
-    environment {
-        config = [
-            // Basic and Common Variables
-            modelName: "${params.MODEL_NAME}",
-            dockerRegistry: "${params.DOCKER_REGISTRY}",
-            dockerCredentialsId: "${params.DOCKER_CREDENTIALS_ID}",
-            dockerImage: "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:${env.BUILD_NUMBER}",
-            dockerImageLatest: "${env.DOCKER_REGISTRY}/${env.MODEL_NAME}:latest",
-            helmChartPath: "./deployment/helm",
-            helmChartName: "${params.MODEL_NAME}-chart",
-            dockerRegistry: 'docker.io',
-
-            // Feature Flags
-            hasApi: true,
-            useHelm: "${params.USE_HELM}",
-            useMlflow: "${params.USE_MLFLOW}",
-            runLoadTests: false,
-            runSecurityTests: true,
-            runSmokeTests: true,
-            autoRollback: true,
-            
-            // Monitoring
-            enablePrometheus: true,
-            enableGrafana: false,
-            enableAlerting: false,
-            
-            // Notifications
-            emailRecipients: 'manhhung20033004@gmail.com'
-        ]
-    }
-
     stages {
-        stage("Data Validation") {
+        stage("init environment") {
             steps {
                 script {
+                    def config = [
+                        // Basic and Common Variables
+                        modelName: params.MODEL_NAME,
+                        dockerRegistry: params.DOCKER_REGISTRY,
+                        dockerCredentialsId: params.DOCKER_CREDENTIALS_ID,
+                        dockerImage: "${params.DOCKER_REGISTRY}/${params.MODEL_NAME}:${env.BUILD_NUMBER}",
+                        dockerImageLatest: "${params.DOCKER_REGISTRY}/${params.MODEL_NAME}:latest",
+                        helmChartPath: "./deployment/helm",
+                        helmChartName: "${params.MODEL_NAME}-chart",
+                        environment: params.ENVIRONMENT,
+                        buildNumber: env.BUILD_NUMBER,
+                        
+                        // Git Information
+                        gitCommit: env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse HEAD').trim(),
+                        gitBranch: env.BRANCH_NAME ?: 'main',
+
+                        // Feature Flags
+                        hasApi: params.HAS_API,
+                        useHelm: params.USE_HELM,
+                        useMlflow: params.USE_MLFLOW,
+                        runLoadTests: params.RUN_LOAD_TESTS,
+                        runSecurityTests: true,
+                        runSmokeTests: true,
+                        autoRollback: true,
+                        skipTests: params.SKIP_TESTS,
+                        
+                        // Monitoring
+                        enablePrometheus: true,
+                        enableGrafana: false,
+                        enableAlerting: false,
+                        
+                        // Paths
+                        srcPath: 'src',
+                        testsPath: 'tests',
+                        modelsPath: 'models',
+                        requirementsFile: 'requirements.txt',
+                        
+                        // Notifications
+                        emailRecipients: 'manhhung20033004@gmail.com'
+                    ]
+
+                    env.PIPELINE_CONFIG = writeJSON returnText: true, json: config
+                    echo "Pipeline configuration initialized: ${env.PIPELINE_CONFIG}"
+                    echo "Environment: ${params.ENVIRONMENT}"
+                    echo "Model Name: ${params.MODEL_NAME}"
+                    echo "Features: API=${config.hasApi}, Helm=${config.useHelm}, MLflow=${config.useMlflow}"
+
+                }
+            }
+        }
+        stage("Data Validation") {
+            when {
+                not{
+                    expression {
+                        def config = readJSON text: env.PIPELINE_CONFIG
+                        return config.skipTests
+                    }
+                }
+            }
+            steps {
+                script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     dataValidation(config)
                 }
             }
         }
         stage("Model training") {
+            when {
+                not {
+                    expression {
+                        def config = readJSON text: env.PIPELINE_CONFIG
+                        return config.skipTests
+                    }
+                }
+            }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelTraining(config)
                 }
             }
         }
         stage("Model Validation"){
+            when {
+                not {
+                    expression {
+                        def config = readJSON text: env.PIPELINE_CONFIG
+                        return config.skipTests
+                    }
+                }
+            }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelValidation(config)
                 }
             }
         }
         stage("Model Testing") {
+            when {
+                not {
+                    expression {
+                        def config = readJSON text: env.PIPELINE_CONFIG
+                        return config.skipTests
+                    }
+                }
+            }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelTesting(config)
                 }
             }
@@ -85,6 +147,7 @@ pipeline {
             }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelPackaging(config)
                 }
             }
@@ -98,6 +161,7 @@ pipeline {
             }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelDeployment(config)
                 }
             }
@@ -111,6 +175,7 @@ pipeline {
             }
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     modelMonitoringSetup(config)
                 }
             }
@@ -118,6 +183,7 @@ pipeline {
         stage("Send Notifications") {
             steps {
                 script {
+                    def config = readJSON text: env.PIPELINE_CONFIG
                     sendNotifications(config)
                 }
             }
